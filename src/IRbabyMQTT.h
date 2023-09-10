@@ -1,6 +1,9 @@
 #ifndef IRBABY_MQTT_H
 #define IRBABY_MQTT_H
 #include <WString.h>
+#include <ArduinoJson.h>
+#include "IRbabyGlobal.h"
+
 /* MQTT 初始化 */
 void mqttInit();
 
@@ -17,11 +20,16 @@ bool mqttConnected();
 void mqttLoop();
 
 /* MQTT 信息发送 */
-void mqttPublish(String topic, String payload);
+void mqttPublish(const char *topic, JsonDoc *json);
 
 /* MQTT 信息发送 */
-void mqttPublishRetained(String topic, String payload);
+void mqttPublishRetained(const char *topic, JsonDoc *json);
 
 /* MQTT 连接检查 */
 void mqttCheck();
+
+/* 生成MQTT TOPIC */
+String createTopic(const char * topic);
+
+String createTopic(String topic);
 #endif // IRBABY_MQTT_H

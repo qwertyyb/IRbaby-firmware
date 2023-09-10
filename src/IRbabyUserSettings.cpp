@@ -3,11 +3,10 @@
 #include "IRbabyMQTT.h"
 #include "WiFiManager.h"
 #include "IRbabyGlobal.h"
-#include "IRbabyIR.h"
 #include "defines.h"
 #include <LittleFS.h>
-StaticJsonDocument<1024> ConfigData;
-StaticJsonDocument<1024> ACStatus;
+JsonDoc ConfigData;
+JsonDoc ACStatus;
 
 bool settingsSave()
 {
@@ -87,33 +86,6 @@ void settingsClear()
     ESP.eraseConfig();
     LittleFS.format();
     ESP.reset();
-}
-
-bool saveACStatus(String file, t_remote_ac_status status)
-{
-    bool ret = false;
-    ACStatus[file]["power"] = (int)status.ac_power;
-    ACStatus[file]["temperature"] = (int)status.ac_temp;
-    ACStatus[file]["mode"] = (int)status.ac_mode;
-    ACStatus[file]["swing"] = (int)status.ac_swing;
-    ACStatus[file]["speed"] = (int)status.ac_wind_speed;
-    return ret;
-}
-
-t_remote_ac_status getACState(String file)
-{
-    t_remote_ac_status status;
-    int power = (int)ACStatus[file]["power"];
-    int temperature = (int)ACStatus[file]["temperature"];
-    int mode = (int)ACStatus[file]["mode"];
-    int swing = (int)ACStatus[file]["swing"];
-    int wind_speed = (int)ACStatus[file]["speed"];
-    status.ac_power = (t_ac_power)power;
-    status.ac_temp = (t_ac_temperature)temperature;
-    status.ac_mode = (t_ac_mode)mode;
-    status.ac_swing = (t_ac_swing)swing;
-    status.ac_wind_speed = (t_ac_wind_speed)wind_speed;
-    return status;
 }
 
 void clearBinFiles() {

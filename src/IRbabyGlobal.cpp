@@ -6,17 +6,25 @@
  */
 #include "IRbabyGlobal.h"
 #include "defines.h"
+#include <ir_Coolix.h>
+#include <IRac.h>
+#include <IRtext.h>
+#include <IRutils.h>
 
-StaticJsonDocument<1024> recv_msg_doc;
-StaticJsonDocument<1024> send_msg_doc;
-StaticJsonDocument<1024> udp_msg_doc;
-StaticJsonDocument<1024> mqtt_msg_doc;
+JsonDoc recv_msg_doc;
+JsonDoc send_msg_doc;
+JsonDoc udp_msg_doc;
+JsonDoc mqtt_msg_doc;
 
 WiFiManager wifi_manager;
 WiFiClient wifi_client;
 
+const uint16_t kCaptureBufferSize = 1024;
+
 uint8_t ir_send_pin = T_IR;
 uint8_t ir_receive_pin = R_IR;
+
+IRCoolixAC mideaAC(T_IR, true);
 
 #ifdef USE_RF
 uint8_t rf315_send_pin = T_315;

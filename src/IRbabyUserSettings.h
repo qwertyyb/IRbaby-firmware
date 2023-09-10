@@ -7,8 +7,7 @@
 #ifndef IRBABY_USER_SETTINGS_H
 #define IRBABY_USER_SETTINGS_H
 #include <ArduinoJson.h>
-
-#include "../lib/Irext/include/ir_ac_control.h"
+#include "IRbabyGlobal.h"
 
 #define BIN_SAVE_PATH "/bin/"
 
@@ -21,10 +20,7 @@ void settingsClear();
 /* 加载配置信息 */
 bool settingsLoad();
 
-bool saveACStatus(String, t_remote_ac_status);
-t_remote_ac_status getACState(String file);
-
 void clearBinFiles();
-extern StaticJsonDocument<1024> ConfigData;
-extern StaticJsonDocument<1024> ACStatus;
+extern JsonDoc ConfigData;
+extern JsonDoc ACStatus;
 #endif  // IRBABY_USER_SETTINGS_H

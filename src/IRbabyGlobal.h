@@ -10,17 +10,24 @@
 #include <ArduinoJson.h>
 #include <WiFiManager.h>
 #include <WiFiClient.h>
+#include <ir_Coolix.h>
+#include <IRrecv.h>
 #ifdef USE_LED
 #include "jled.h"
 #endif // USE_LED
+
+#define JsonDoc StaticJsonDocument<2048>
+
 /* goable json variable */
-extern StaticJsonDocument<1024> recv_msg_doc;
-extern StaticJsonDocument<1024> send_msg_doc;
-extern StaticJsonDocument<1024> udp_msg_doc;
-extern StaticJsonDocument<1024> mqtt_msg_doc;
+extern JsonDoc recv_msg_doc;
+extern JsonDoc send_msg_doc;
+extern JsonDoc udp_msg_doc;
+extern JsonDoc mqtt_msg_doc;
 
 extern WiFiManager wifi_manager;
 extern WiFiClient wifi_client;
+
+extern IRCoolixAC mideaAC;
 
 extern uint8_t ir_send_pin;
 extern uint8_t ir_receive_pin;

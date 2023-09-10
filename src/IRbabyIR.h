@@ -1,18 +1,19 @@
-#ifndef IRBABYIR_H
-#define IRBABYIR_H
+#ifndef IRBABY_IR_H
+#define IRBABY_IR_H
 
-#include <Arduino.h>
-#include <IRsend.h>
-#include <IRrecv.h>
-#include "../lib/Irext/include/ir_decode.h"
+#include "IRbabyGlobal.h"
 
-void loadIRPin(uint8_t send_pin, uint8_t recv_pin);
-void enableIR();
-void disableIR();
-void sendStatus(String file_name, t_remote_ac_status status);
-bool sendKey(String file_name, int key);
-bool sendIR(String file_name);
+void enableRecvIR();
+void disableRecvIR();
+void toggleRecvIR(const bool enable);
+bool isRecvIREnable();
 void recvIR();
-bool saveIR(String file_name);
-void initAC(String);
-#endif // IRBABAYIR_H
+
+bool sendIR(JsonDoc *payload);
+bool sendIR(String name);
+
+bool saveIRTemp(volatile uint16_t *buf, uint16_t len);
+bool saveIR(JsonDoc *payload);
+String listSavedIR();
+
+#endif

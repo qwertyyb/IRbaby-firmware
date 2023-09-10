@@ -1,232 +1,221 @@
-#include "IRbabyIR.h"
-#include "ESP8266HTTPClient.h"
-#include "IRbabySerial.h"
-#include "IRbabyUDP.h"
-#include "IRbabyUserSettings.h"
+#include <IRrecv.h>
+#include <IRac.h>
+#include <IRtext.h>
+#include <IRutils.h>
 #include <LittleFS.h>
-#include "IRbabyGlobal.h"
 #include "defines.h"
+#include "IRbabyMQTT.h"
+#include "IRbabyGlobal.h"
+#include "IRbabySerial.h"
+#include "IRbabyIR.h"
 
-#define DOWNLOAD_PREFIX "http://irext-debug.oss-cn-hangzhou.aliyuncs.com/irda_"
-#define DOWNLOAD_SUFFIX ".bin"
-#define SAVE_PATH "/bin/"
+// #define SAVE_A_PATH "/bin/";
 
-decode_results results; // Somewhere to store the results
-const uint8_t kTimeout = 50;
-// As this program is a special purpose capture/decoder, let us use a larger
-// than normal buffer so we can handle Air Conditioner remote codes.
-const uint16_t kCaptureBufferSize = 1024;
-static IRsend * ir_send = nullptr;
-static IRrecv * ir_recv = nullptr;
-bool saveSignal();
+// As this program is a special purpose capture/resender, let's use a larger
+// than expected buffer so we can handle very large IR messages.
+const uint16_t kCaptureBufferSize = 1024;  // 1024 == ~511 bits
 
-void downLoadFile(String file)
-{
-  HTTPClient http_client;
-  String download_url = DOWNLOAD_PREFIX + file + DOWNLOAD_SUFFIX;
-  String save_path = BIN_SAVE_PATH + file;
-  File cache = LittleFS.open(save_path, "w");
-  if (cache) {
-    http_client.begin(wifi_client, download_url);
-    if (http_client.GET() == HTTP_CODE_OK) {
-        WiFiClient &wificlient = http_client.getStream();
-        uint8_t buff[512];
-        int n = wificlient.readBytes(buff, http_client.getSize());
-        cache.write(buff, n);
-        cache.flush();
+// kTimeout is the Nr. of milli-Seconds of no-more-data before we consider a
+// message ended.
+const uint8_t kTimeout = 50;  // Milli-Seconds
+
+// kFrequency is the modulation frequency all UNKNOWN messages will be sent at.
+const uint16_t kFrequency = 38000;  // in Hz. e.g. 38kHz.
+
+bool recvIREnabled = false;
+
+// The IR receiver.
+IRrecv irrecv(R_IR, kCaptureBufferSize, kTimeout, false);
+IRsend irsend(T_IR);
+// Somewhere to store the captured message.
+decode_results results;
+
+void enableRecvIR() {
+  INFOLN("enableRecvIR");
+  irrecv.enableIRIn();  // Start up the IR receiver.
+  recvIREnabled = true;
+}
+
+void disableRecvIR() {
+  INFOLN("disableRecvIR")
+  irrecv.disableIRIn(); // stop the IR receiver.
+  recvIREnabled = false;
+}
+
+void toggleRecvIR(const bool enable) {
+  if (enable) return enableRecvIR();
+  return disableRecvIR();
+}
+
+bool isRecvIREnable() {
+  return recvIREnabled;
+}
+
+String dumpRawData(decode_results *results) {
+  String output = "";
+  // Dump data
+  for (uint16_t i = 1; i < results->rawlen; i++) {
+    uint32_t usecs;
+    for (usecs = results->rawbuf[i] * kRawTick; usecs > UINT16_MAX;
+         usecs -= UINT16_MAX) {
+      output += uint64ToString(UINT16_MAX);
+      if (i % 2)
+        output += F(", 0,  ");
+      else
+        output += F(",  0, ");
     }
-  } else {
-      clearBinFiles();
+    output += uint64ToString(usecs, 10);
+    if (i < results->rawlen - 1)
+      output += kCommaSpaceStr;            // ',' not needed on the last one
+    if (i % 2 == 0) output += "";  // Extra if it was even.
   }
-  cache.close();
-  http_client.end();
+  return output;
 }
 
-bool sendIR(String file_name)
-{
-    String save_path = SAVE_PATH + file_name;
-    if (LittleFS.exists(save_path))
-    {
-        File cache = LittleFS.open(save_path, "r");
-        if (!cache)
-        {
-            ERRORF("Failed to open %s", save_path.c_str());
-            return false;
-        }
-        Serial.println();
-        uint16_t *data_buffer = (uint16_t *)malloc(sizeof(uint16_t) * 512);
-        uint16_t length = cache.size() / 2;
-        memset(data_buffer, 0x0, 512);
-        INFOF("file size = %d\n", cache.size());
-        INFOLN();
-        cache.readBytes((char *)data_buffer, cache.size());
-        ir_recv->disableIRIn();
-        ir_send->sendRaw(data_buffer, length, 38);
-        ir_recv->enableIRIn();
-        free(data_buffer);
-        cache.close();
-        return true;
+void recvIR() {
+   // Check if an IR message has been received.
+  if (!irrecv.decode(&results)) return;
+  // We have captured something.
+  String output = resultToHumanReadableBasic(&results) + "\n";
+  String description = IRAcUtils::resultAcToString(&results);
+  output += (D_STR_MESGDESC ": " + description + "\n");
+  output += resultToSourceCode(&results);
+  if (LOG_INFO) {
+    // Display the basic output of what we found.
+    Serial.println(output);
+    yield();
+  }
+  send_msg_doc.clear();
+  // protocol
+  send_msg_doc["ptl"] = typeToString(results.decode_type, results.repeat);
+  send_msg_doc["raw"] = dumpRawData(&results);
+  send_msg_doc["len"] = getCorrectedRawLength(&results);
+  send_msg_doc["val"] = "0x" + uint64ToString(results.value, 16);
+  saveIRTemp(results.rawbuf, results.rawlen);
+  irrecv.resume();
+  disableRecvIR();
+  mqttPublish("send/event/ir-received", &send_msg_doc);
+}
+
+uint16_t* getRaw(String str, uint16_t len) {
+  uint16_t* raw = new uint16_t[len];
+  Serial.println(str);
+  int count = 0;
+  String substr = "";
+  for(unsigned int i = 0; i < str.length(); i++) {
+    if (str[i] == ',') {
+      Serial.printf("%d: %s\n", count, substr.c_str());
+      raw[count++] = atol(substr.c_str());
+      substr = "";
+    } else {
+      substr += str[i];
     }
+  }
+  Serial.printf("%d: %s\n", count, substr.c_str());
+  raw[count++] = atol(substr.c_str());
+  return raw;
+};
+bool sendIR(JsonDoc *payload) {
+  disableRecvIR();
+  DEBUGF("sendIR with json payload\n");
+  if (payload->containsKey("raw")) {
+    uint16_t len = (*payload)["len"].as<uint16_t>();
+    uint16_t* raw = getRaw((*payload)["raw"], len);
+    irsend.begin();
+    irsend.sendRaw(raw, len, kFrequency);
+    return true;
+    delete [] raw;
+  } else if (payload->containsKey("name")) {
+    return sendIR((*payload)["name"].as<String>());
+  }
+  return false;
+}
+bool sendIR(String name) {
+  DEBUGF("sendIR: %s\n", name.c_str());
+  String save_path = "/bin/";
+  save_path += name;
+  if (!LittleFS.exists(save_path)) {
     return false;
-}
-
-void sendStatus(String file, t_remote_ac_status status)
-{
-    String save_path = SAVE_PATH + file;
-    if (!LittleFS.exists(save_path))
-        downLoadFile(file);
-
-    if (LittleFS.exists(save_path))
-    {
-        File cache = LittleFS.open(save_path, "r");
-        if (cache)
-        {
-            UINT16 content_size = cache.size();
-            DEBUGF("content size = %d\n", content_size);
-
-            if (content_size != 0)
-            {
-                UINT8 *content = (UINT8 *)malloc(content_size * sizeof(UINT8));
-                cache.seek(0L, fs::SeekSet);
-                cache.readBytes((char *)content, content_size);
-                ir_binary_open(REMOTE_CATEGORY_AC, 1, content, content_size);
-                UINT16 *user_data = (UINT16 *)malloc(1024 * sizeof(UINT16));
-                UINT16 data_length = ir_decode(0, user_data, &status, FALSE);
-
-                DEBUGF("data_length = %d\n", data_length);
-                ir_recv->disableIRIn();
-                ir_send->sendRaw(user_data, data_length, 38);
-                ir_recv->enableIRIn();
-                ir_close();
-                free(user_data);
-                free(content);
-                saveACStatus(file, status);
-            }
-            else
-                ERRORF("Open %s is empty\n", save_path.c_str());
-        }
-        cache.close();
-    }
-}
-
-void recvIR()
-{
-    if (ir_recv->decode(&results))
-    {
-        DEBUGF("raw length = %d\n", results.rawlen - 1);
-        String raw_data;
-        for (int i = 1; i < results.rawlen; i++)
-            raw_data += String(*(results.rawbuf + i) * kRawTick) + " ";
-        ir_recv->resume();
-        send_msg_doc.clear();
-        send_msg_doc["cmd"] = "record_rt";
-        send_msg_doc["params"]["signal"] = "IR";
-        send_msg_doc["params"]["length"] = results.rawlen;
-        send_msg_doc["params"]["value"] = raw_data.c_str();
-        DEBUGLN(raw_data.c_str());
-        sendUDP(&send_msg_doc, remote_ip);
-        saveSignal();
-    }
-}
-
-bool saveIR(String file_name)
-{
-    String save_path = SAVE_PATH;
-    save_path += file_name;
-    return LittleFS.rename("/bin/test", save_path);
-}
-
-bool saveSignal()
-{
-    String save_path = SAVE_PATH;
-    save_path += "test";
-    DEBUGF("save raw data as %s\n", save_path.c_str());
-    File cache = LittleFS.open(save_path, "w");
-    if (!cache)
-    {
-        ERRORLN("Failed to create file");
-        return false;
-    }
-    for (size_t i = 0; i < results.rawlen; i++)
-        *(results.rawbuf + i) = *(results.rawbuf + i) * kRawTick;
-    cache.write((char *)(results.rawbuf + 1), (results.rawlen - 1) * 2);
+  }
+  File cache = LittleFS.open(save_path, "r");
+  if (!cache) return false;
+  uint16 content_size = cache.size();
+  DEBUGF("content size = %d\n", content_size);
+  if (content_size == 0) {
     cache.close();
-    return true;
+    return false;
+  }
+  uint8 *content = (uint8 *)malloc(content_size * sizeof(uint8));
+  cache.seek(0L, fs::SeekSet);
+  cache.readBytes((char *)content, content_size);
+  uint16_t *buf = (uint16 *)malloc(1024 * sizeof(uint16_t));
+  disableRecvIR();
+  for(int i = 0; i < content_size; i+=2) {
+    buf[i / 2] = ((uint16_t)(content[i+1] << 8)) + content[i];
+  }
+  irsend.sendRaw(buf, content_size / 2, 38);
+  free(content);
+  free(buf);
+  cache.close();
+  return true;
+}
+bool saveIRTemp(volatile uint16_t *buf, uint16_t len) {
+  DEBUGF("saveIRTemp: %d\n", len);
+  String save_path = "/bin/";
+  save_path += "temp";
+  DEBUGF("save raw data as %s\n", save_path.c_str());
+  File cache = LittleFS.open(save_path, "w");
+  if (!cache)
+  {
+      ERRORLN("Failed to create file");
+      return false;
+  }
+  for (size_t i = 0; i < len; i++)
+      *(buf + i) = *(buf + i) * kRawTick;
+  cache.write((char *)(buf + 1), (len - 1) * 2);
+  cache.close();
+  return true;
 }
 
-void initAC(String file)
-{
-    ACStatus[file]["power"] = 0;
-    ACStatus[file]["temperature"] = 8;
-    ACStatus[file]["mode"] = 2;
-    ACStatus[file]["swing"] = 0;
-    ACStatus[file]["speed"] = 0;
+bool saveIR(String name) {
+  String save_path = "/bin/";
+  save_path += name;
+  return LittleFS.rename("/bin/temp", save_path);
 }
 
-bool sendKey(String file_name, int key)
-{
-    String save_path = SAVE_PATH;
-    save_path += file_name;
-    if (LittleFS.exists(save_path))
-    {
-        File cache = LittleFS.open(save_path, "r");
-        if (cache)
-        {
-            UINT16 content_size = cache.size();
-            DEBUGF("content size = %d\n", content_size);
-
-            if (content_size != 0)
-            {
-                UINT8 *content = (UINT8 *)malloc(content_size * sizeof(UINT8));
-                cache.seek(0L, fs::SeekSet);
-                cache.readBytes((char *)content, content_size);
-                ir_binary_open(2, 1, content, content_size);
-                UINT16 *user_data = (UINT16 *)malloc(1024 * sizeof(UINT16));
-                UINT16 data_length = ir_decode(0, user_data, NULL, FALSE);
-
-                DEBUGF("data_length = %d\n", data_length);
-                if (LOG_DEBUG)
-                {
-                    for (int i = 0; i < data_length; i++)
-                        Serial.printf("%d ", *(user_data + i));
-                    Serial.println();
-                }
-                ir_recv->disableIRIn();
-                ir_send->sendRaw(user_data, data_length, 38);
-                ir_recv->enableIRIn();
-                ir_close();
-                free(user_data);
-                free(content);
-            }
-            else
-                ERRORF("Open %s is empty\n", save_path.c_str());
-        }
-        cache.close();
-    }
-    return true;
+bool saveIR(JsonDoc *payload) {
+  if (payload->containsKey("raw")) {
+    uint16_t* raw = getRaw((*payload)["raw"], (*payload)["len"]);
+    saveIRTemp(raw, (*payload)["len"]);
+  }
+  return saveIR((*payload)["name"].as<String>());
 }
 
-void loadIRPin(uint8_t send_pin, uint8_t recv_pin)
-{
-    if (ir_send != nullptr) {
-        delete ir_send;
-    }
-    if (ir_recv != nullptr) {
-        delete ir_recv;
-    }
-    ir_send = new IRsend(send_pin);
-    DEBUGF("Load IR send pin at %d\n", send_pin);
-    ir_send->begin();
-    ir_recv = new IRrecv(recv_pin, kCaptureBufferSize, kTimeout, true);
-    disableIR();
-}
+String listSavedIR() {
+  const char *dirname = "/bin";
+  DEBUGF("listSavedIR dirname: %s\n", dirname);
 
-void disableIR()
-{
-    ir_recv->disableIRIn();
-}
+  Dir root = LittleFS.openDir(dirname);
 
-void enableIR()
-{
-    ir_recv->enableIRIn();
+  String output = "";
+  while (root.next()) {
+    File file = root.openFile("r");
+    output += ("f:" + root.fileName());
+    output += ("\ns:" + String(root.fileSize()));
+    output += "\n";
+    DEBUG("  FILE: ");
+    DEBUG(root.fileName());
+    DEBUG("  SIZE: ");
+    DEBUG(file.size());
+    time_t cr = file.getCreationTime();
+    time_t lw = file.getLastWrite();
+    file.close();
+    struct tm *tmstruct = localtime(&cr);
+    DEBUGF("    CREATION: %d-%02d-%02d %02d:%02d:%02d\n", (tmstruct->tm_year) + 1900, (tmstruct->tm_mon) + 1, tmstruct->tm_mday, tmstruct->tm_hour, tmstruct->tm_min, tmstruct->tm_sec);
+    tmstruct = localtime(&lw);
+    DEBUGF("  LAST WRITE: %d-%02d-%02d %02d:%02d:%02d\n", (tmstruct->tm_year) + 1900, (tmstruct->tm_mon) + 1, tmstruct->tm_mday, tmstruct->tm_hour, tmstruct->tm_min, tmstruct->tm_sec);
+  }
+
+  DEBUGF("listSavedIR output: %s\n", output.c_str());
+  return output;
 }

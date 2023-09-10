@@ -5,6 +5,8 @@
 #include "IRbabyUserSettings.h"
 #include "IRbabyMsgHandler.h"
 #include "IRbabyGlobal.h"
+#include <ArduinoJson.h>
+
 PubSubClient mqtt_client(wifi_client);
 
 void callback(char *topic, byte *payload, unsigned int length);
@@ -22,13 +24,13 @@ void mqttInit()
 bool mqttReconnect()
 {
     bool flag = false;
-    if (ConfigData.containsKey("mqtt"))
+    INFOF("MQTT client is connected: %d\n", mqttConnected());
+    if (!mqttConnected())
     {
-        JsonObject mqtt_obj = ConfigData["mqtt"];
-        const char *host = mqtt_obj["host"];
-        int port = mqtt_obj["port"];
-        const char *user = mqtt_obj["user"];
-        const char *password = mqtt_obj["password"];
+        const char *host = "192.168.31.31"; // mqtt_obj["host"];
+        int port = 1883; // mqtt_obj["port"];
+        const char *user = "user"; // mqtt_obj["user"];
+        const char *password = "password"; //mqtt_obj["password"];
         if (host && port)
         {
             mqtt_client.setServer(host, port);
@@ -38,9 +40,10 @@ bool mqttReconnect()
             if (mqtt_client.connect(chip_id.c_str(), user,
                                     password))
             {
-                String sub_topic = String("/IRbaby/") +
-                                   chip_id + String("/send/#");
+                String sub_topic = createTopic("receive/#");
                 DEBUGF("MQTT subscribe %s\n", sub_topic.c_str());
+                publishSystemInfo();
+                publishSystemRunning();
                 mqtt_client.subscribe(sub_topic.c_str());
                 flag = true;
             }
@@ -64,6 +67,13 @@ void callback(char *topic, byte *payload, unsigned int length)
     for (uint32_t i = 0; i < length; i++)
         payload_str += (char)payload[i];
     String topic_str(topic);
+    if (LOG_DEBUG) {
+        Serial.println(topic_str);
+        Serial.println(payload_str);
+        Serial.println();
+    }
+    deserializeJson(recv_msg_doc, payload_str.c_str());
+    return msgHandler(String(topic), &recv_msg_doc);
     uint8_t index = 0;
     String option;
     String func;
@@ -107,14 +117,19 @@ void mqttLoop()
     mqtt_client.loop();
 }
 
-void mqttPublish(String topic, String payload)
+void mqttPublish(const char *topic, JsonDoc *json)
 {
-    mqtt_client.publish(topic.c_str(), payload.c_str());
+    char str[2048];
+    serializeJson(*json, str);
+    Serial.printf("mqttPublish: %s\n", str);
+    mqtt_client.publish(createTopic(topic).c_str(), str);
 }
 
-void mqttPublishRetained(String topic, String payload)
+void mqttPublishRetained(const char *topic, JsonDoc *json)
 {
-    mqtt_client.publish(topic.c_str(), payload.c_str(), true);
+    char str[1024];
+    serializeJson(*json, str);
+    mqtt_client.publish(createTopic(topic).c_str(), str, true);
 }
 
 void mqttCheck()
@@ -132,4 +147,11 @@ void mqttCheck()
         led.On();
 #endif // USE_LED
     }
+}
+
+String createTopic(const char* topic) {
+    return String("device/") + WiFi.macAddress() + "/" + String(topic);
+}
+String createTopic(String topic) {
+    return createTopic(topic.c_str());
 }

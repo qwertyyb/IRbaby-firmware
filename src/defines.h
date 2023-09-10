@@ -43,7 +43,7 @@ typedef unsigned char uint8_t;
 // #define USE_RF
 
 // uncomment below to enable upload chip id to remote server
-#define USE_INFO_UPLOAD
+// #define USE_INFO_UPLOAD
 
 // uncomment below to enable binary sensor
 #ifdef USE_SENSOR
@@ -63,8 +63,11 @@ typedef unsigned char uint8_t;
 
 /* IR pin */
 #define T_IR 14
-#define R_IR 12
+#define R_IR 5
 
 /* Sensor Pin*/
 #define SENSOR_PIN 0
+
+#define MQTT_SERVER "192.168.31.31"
+#define MQTT_PORT 1883
 #endif  // _DEFINES_H

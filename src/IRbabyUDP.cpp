@@ -30,7 +30,7 @@ char *udpRecive()
     return nullptr;
 }
 
-uint32_t sendUDP(StaticJsonDocument<1024>* doc, IPAddress ip)
+uint32_t sendUDP(JsonDoc* doc, IPAddress ip)
 {
     DEBUGF("return message %s\n", ip.toString().c_str());
     UDP.beginPacket(ip, UDP_PORT);
@@ -38,7 +38,7 @@ uint32_t sendUDP(StaticJsonDocument<1024>* doc, IPAddress ip)
     return UDP.endPacket();
 }
 
-uint32_t returnUDP(StaticJsonDocument<1024>* doc)
+uint32_t returnUDP(JsonDoc* doc)
 {
     DEBUGF("return message to %s\n", UDP.remoteIP().toString().c_str());
     UDP.beginPacket(UDP.remoteIP(), UDP_PORT);

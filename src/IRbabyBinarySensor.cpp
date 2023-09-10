@@ -18,6 +18,6 @@ void binary_sensor_loop() {
     int value = digitalRead(SENSOR_PIN);
     String message = value == HIGH ? "on" : "off";
     String topic = "/IRbaby/" + chip_id + "/sensor";
-    mqttPublish(topic, message);
+    // mqttPublish(topic, message);
   }
 }
